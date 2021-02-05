@@ -835,45 +835,11 @@ sendWakeUpBroadcast
 sendGoToSleepBroadcast
 ```
 
+### 灭屏流程
+![](assets/markdown-img-paste-20210205191131759.png)
 
-1 亮屏流程
-```java
-interceptKeyBeforeQueueing
-	interceptPowerKeyUp
-		powerPress
-			goToSleep
-				mPowerManager.goToSleep(eventTime, reason, flags);
-						goToSleep
-							goToSleepInternal
-								goToSleepNoUpdateLocked
-									updatePowerStateLocked();
-```
+### 亮屏流程
+![](assets/markdown-img-paste-20210205193447675.png)
 
-2 灭屏流程
-```java
-interceptKeyBeforeQueueing
-	interceptPowerKeyDown
-		wakeUpFromPowerKey
-			wakeUp(eventTime, mAllowTheaterModeWakeFromPowerKey, "android.policy:POWER");
-				mPowerManager.wakeUp(wakeTime, reason);
-					wakeUp
-						wakeUpInternal
-							wakeUpNoUpdateLocked
-								updatePowerStateLocked();
-```
-
-
-3 用户活动流程
-```java
-InputDispatcherThread::threadLoop
-	InputDispatcher::dispatchOnce
-		InputDispatcher::dispatchOnceInnerLocked
-			InputDispatcher::pokeUserActivityLocked
-				InputDispatcher::doPokeUserActivityLockedInterruptible
-					mPolicy->pokeUserActivity // mPolicy = InputDispatcherPolicyInterface
-						NativeInputManager::pokeUserActivity
-							android_server_PowerManagerService_userActivity
-								PowerManagerService::userActivityFromNative
-									userActivity
-
-```
+### 用户活动流程
+![](assets/markdown-img-paste-20210205194433873.png)

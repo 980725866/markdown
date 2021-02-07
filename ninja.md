@@ -1,6 +1,18 @@
 ## ninja简介
 早期的Android系统都是采用Android.mk的配置来编译源码，从Android 7.0开始引入ninja。ninja是一个编译框架，会根据相应的ninja格式的配置文件进行编译，使用ninja的主要目的是用来加快Android源码的编译速度
 
+## Android.bp
+Android.bp的出现就是为了替换Android.mk文件。bp跟mk文件不同，它是纯粹的配置，没有分支、循环等流程控制，不能做算数逻辑运算。如果需要控制逻辑，那么只能通过Go语言编写。
+
+## Soong
+Soong类似于之前的Makefile编译系统的核心，负责提供Android.bp语义解析，并将之转换成Ninja文件。Soong还会编译生成一个androidmk命令，用于将Android.mk文件转换为Android.bp文件，不过这个转换功能仅限于没有分支、循环等流程控制的Android.mk才有效。
+
+## Blueprint
+Blueprint是生成、解析Android.bp的工具，是Soong的一部分。Soong负责Android编译而设计的工具，而Blueprint只是解析文件格式，Soong解析内容的具体含义。Blueprint和Soong都是由Golang写的项目，从Android 7.0，prebuilts/go/目录下新增Golang所需的运行环境，在编译时使用。
+
+## Kati
+kati是专为Android开发的一个基于Golang和C++的工具，主要功能是把Android中的Android.mk文件转换成Ninja文件。代码路径是build/kati/，编译后的产物是ckati。
+
 ## Android中的ninja程序
 ```java
 prebuilts/build-tools/linux-x86/bin/ninja

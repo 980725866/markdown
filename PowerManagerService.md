@@ -835,6 +835,9 @@ sendWakeUpBroadcast
 sendGoToSleepBroadcast
 ```
 
+### mtk亮灭屏流程
+![](assets/markdown-img-paste-20210207101837321.png)
+
 ### 灭屏流程
 ![](assets/markdown-img-paste-20210205191131759.png)
 
@@ -843,3 +846,6 @@ sendGoToSleepBroadcast
 
 ### 用户活动流程
 ![](assets/markdown-img-paste-20210205194433873.png)
+
+推荐博客<br>
+http://blog.chinaunix.net/uid-30510400-id-5569393.html

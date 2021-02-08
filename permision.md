@@ -1,83 +1,36 @@
 
+Android6.0之前，设备上安装的软件只要在AndroidManifest.xml中声明了的权限就可以拥有那些权限(安装时权限)， 6.0以及之后增加运行时权限，不但要AndroidManifest.xml中声明，APK运行时通过弹窗提示用户是否给予授权
 
-
-// 授权和撤销
-grantRuntimePermission
-revokeRuntimePermissio
-// 安装时权限
-grantInstallPermission
-	grantPermission
-		userState.mGranted = true;
-		final int[] newGids = computeGids(userId);
-
-// 运行时权限
-grantRuntimePermission
-	grantPermission
-		userState.mGranted = true;
-
-
-ActivityCompat
-
-Normal Permissions与Dangerous Permission
-PackageManagerService 提供了 addPermission/ removePermission 接口用来动态添加和删除一些权限。但是这些权限必须是所谓的动态权限（ BasePermission.TYPE_DYNAMIC ）
-
-public void grantUriPermission(IApplicationThread caller, String targetPkg, Uri uri, int mode) throws RemoteException;
-
-// 清除所有通过 grantUriPermission 对某个 Uri 授予的权限。
-
-public void revokeUriPermission(IApplicationThread caller, Uri uri, int mode) throws RemoteException;
-
-grantRuntimePermission
-
-runtime-permissions.xml
-./system/users/0/runtime-permissions.xml
-
-/data/system/packages.xml
-android_filesystem_config.h
-
-
-checkCallingOrSelfPermission
-
-if (mContext.checkCallingOrSelfPermission(android.Manifest.permission.STATUS_BAR_SERVICE)
-		!= PackageManager.PERMISSION_GRANTED) {
-	throw new SecurityException("Caller does not hold permission "
-			+ android.Manifest.permission.STATUS_BAR_SERVICE);
-}
-
-mContext.checkCallingOrSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-
-updatePermissions
-    grantPermissions(pkg, replace, changingPkgName, callback);
-	permissionsState.setGlobalGids(mGlobalGids);
-	bp.isNormal()
-		grant = GRANT_INSTALL;
-		permissionsState.grantInstallPermission(bp)
-	bp.isRuntime()
-		grant = GRANT_RUNTIME;
-		// Grant previously granted runtime permissions. 授予以前授予的运行时权限
-		permissionsState.grantRuntimePermission(bp, userId)
-		permissionsState.updatePermissionFlags(bp, userId, flags, flags);
-
-
-#########################################################################################################
-
-PackageManagerService为Android系统的中的核心功能，主要有APK安装卸载，为APK分配userId, 权限管理，dex优化，四大组件查询等等功能，下面主要分析权限功能
-大致涉及到的类如下：
-
+### 授权和撤销
+PackageManager提供了grantRuntimePermission/revokeRuntimePermission接口用来授权和撤销授权。这些权限一般是PROTECTION_DANGEROUS类型
 ```java
-PackageManagerService
-Settings
-DefaultPermissionGrantPolicy
-PermissionManagerService
-PermissionState
-PermissionData
-BasePermission
-PermissionSettings
-PermissionsState
-PackageSetting
-PackageParser.Package
-PermissionInfo
+// PackageManager
+grantRuntimePermission
+
+revokeRuntimePermission
 ```
+
+### APK申请运行时权限
+```java
+if (ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+    //没有就进行申请
+    ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, PERMISSION_REQUEST_CODE);
+}
+```
+
+Android权限管理的具体实现为PackageManagerService和PermissionManagerService，PackageManagerService也是Android系统的中的核心服务，主要有APK安装卸载，为APK分配userId, 权限管理，dex优化，四大组件查询等等功能
+
+- 权限相关类图关系如下：
+
+![](assets/markdown-img-paste-20210208104030424.png)
+
+
+
+![](assets/markdown-img-paste-20210208104201488.png)
+
+### 权限位置
+- 系统权限: frameworks/base/core/res/AndroidManifest.xml
+- 应用权限: 定义在应用的AndroidManifest.xml
 
 Android系统中权限主要有以下四种：
 ```java
@@ -99,11 +52,16 @@ public class PermissionInfo extends PackageItemInfo implements Parcelable {
     public static final int PROTECTION_SIGNATURE_OR_SYSTEM = 3;
 }
 ```
-AndroidManifest.xml
 
-
-PermissionManagerInternal
-先来看PackageManagerService的创建过程，首先创建了mPermissionManager对象，然后给mDefaultPermissionPolicy赋值，DefaultPermissionPolicy对象是在PermissionManagerService mPermissionManager，mDefaultPermissionPolicy,mSettings赋值，权限相关的功能主要在PermissionManagerService，
+### 权限功能分析
+PackageManagerService的创建过程:
+- 1 首先创建了mPermissionManager对象
+- 2 给mDefaultPermissionPolicy赋值，DefaultPermissionPolicy对象是在PermissionManagerService的构造函数中创建
+- 3 然后创建Settings对象，Setting对象用来记录安装信息，下次开机重启恢复应用的安装信息，运行时权限授权记录的登记
+- 4 通过mSettings.readLPw读取上次安装信息，授权信息
+- 5 扫描APK目录， 安装APK， 会收集AndroidManifest.xml中的权限信息
+- 6 通过mPermissionManager.updateAllPermissions来更新权限信息
+- 7 mSettings.writeLPr()将安装信息，授权信息写到文件
 ```java
 public PackageManagerService(Context context, Installer installer,
             boolean factoryTest, boolean onlyCore) {
@@ -111,8 +69,8 @@ public PackageManagerService(Context context, Installer installer,
 		// Expose private service for system components to use.
 		LocalServices.addService(
 				PackageManagerInternal.class, new PackageManagerInternalImpl());
-    /* 1 mPermissionManager对应的实现为PermissionManagerService的内部类PermissionManagerInternalImpl，
-		方便systemServer进程自己内部调用PermissionManagerService的接口
+		/* 1 mPermissionManager对应的实现为PermissionManagerService的内部类PermissionManagerInternalImpl，
+			方便systemServer进程自己内部调用PermissionManagerService的接口
 		*/
 		mPermissionManager = PermissionManagerService.create(context,
 				new DefaultPermissionGrantedCallback() {
@@ -130,23 +88,24 @@ public PackageManagerService(Context context, Installer installer,
 		mSettings = new Settings(mPermissionManager.getPermissionSettings(), mPackages);
 	}
 
-  /* 4 读取上一次安装信息 */
+	/* 4 读取上一次安装信息 */
 	mFirstBoot = !mSettings.readLPw(sUserManager.getUsers(false));
 
-  /* 5 扫描system,vendor, data目录下的apk,读取apk中的 */
+	/* 5 扫描system,vendor, data目录下的apk,读取apk中的 */
 	scanDirTracedLI();
 
-  /* 6 更新权限，给某些apk授权 */
+	/* 6 更新权限，给某些apk授权 */
 	mPermissionManager.updateAllPermissions(
 		StorageManager.UUID_PRIVATE_INTERNAL, sdkUpdated, mPackages.values(),
 		mPermissionCallback);
 
-  /* 7 将相关权限信息写入文件 */
-	/* */
+	/* 7 将相关权限信息写入文件 */
 	mSettings.writeLPr();
 }
 ```
 
+#### PermissionManagerService::create
+create函数中，先判断是否存在PermissionManagerInternal对象，没有则创建PermissionManagerService对象，PermissionManagerInternal对象是在PermissionManagerService中添加到LocalServices中的
 ```java
 public static PermissionManagerInternal PermissionManagerService::create(Context context,
 		@Nullable DefaultPermissionGrantedCallback defaultGrantCallback,
@@ -162,16 +121,23 @@ public static PermissionManagerInternal PermissionManagerService::create(Context
 }
 ```
 
+#### PermissionManagerService
+PermissionManagerService的创建过程:
+- 1 创建PermissionSettings对象，PermissionSettings记录所有权限相关信息
+- 2 创建mDefaultPermissionPolicy对象
+- 3 解析system/etc/platform.xml中和权限对应的uid, 每条记录对应一个SystemConfig.PermissionEntry对象
+- 4 检查权限信息是否在PermissionSettings已经存在，不存在则创建BasePermission对象，并添加到PermissionSettings的成员变量mPermissions中
+- 5 创建PermissionManagerInternalImpl对象，添加到LocalServices中，PermissionManagerInternalImpl为PermissionManagerService内部类
 ```java
 PermissionManagerService(Context context,
             @Nullable DefaultPermissionGrantedCallback defaultGrantCallback,
             @NonNull Object externalLock) {
-  /* 1 创建PermissionSettings对象 */
+	/* 1 创建PermissionSettings对象 */
 	mSettings = new PermissionSettings(context, mLock);
 	/* 2 创建DefaultPermissionGrantPolicy对象 */
 	mDefaultPermissionGrantPolicy = new DefaultPermissionGrantPolicy(
 			context, mHandlerThread.getLooper(), defaultGrantCallback, this);
-  /* 3 获取系统配置信息 system/etc/platform.xml等等文件中获取 */
+	/* 3 获取系统配置信息 system/etc/platform.xml等等文件中获取 */
 	SystemConfig systemConfig = SystemConfig.getInstance();
 	mSystemPermissions = systemConfig.getSystemPermissions();
 	mGlobalGids = systemConfig.getGlobalGids();
@@ -194,7 +160,7 @@ PermissionManagerService(Context context,
 			}
 		}
 	}
-  /* 创建PermissionManagerInternalImpl对象，并添加到LocalServices中 */
+	/* 创建PermissionManagerInternalImpl对象，并添加到LocalServices中 */
 	LocalServices.addService(PermissionManagerInternal.class, new PermissionManagerInternalImpl());
 }
 ```
@@ -212,7 +178,7 @@ SystemConfig() {
 }
 ```
 
-### system/etc/platform.xml
+#### system/etc/platform.xml
 ```java
 <?xml version="1.0" encoding="utf-8"?>
 <permissions>
@@ -232,7 +198,7 @@ SystemConfig() {
 </permissions>
 ```
 
-### gid数字对应定义在android_filesystem_config.h
+#### gid数字对应定义在android_filesystem_config.h
 ```c
 #define AID_SYSTEM 1000 /* system server */
 #define AID_NET_BT_ADMIN 3001 /* bluetooth: create any socket */
@@ -247,22 +213,8 @@ SystemConfig() {
 #define AID_UHID 3011         /* Allow read/write to /dev/uhid node */
 ```
 
-```java
-private void SystemConfig::readPermissionsFromXml(File permFile, int permissionFlag) {
-	if ("permission".equals(name) && allowPermissions) {
-		String perm = parser.getAttributeValue(null, "name");
-		if (perm == null) {
-			Slog.w(TAG, "<permission> without name in " + permFile + " at "
-				+ parser.getPositionDescription());
-			XmlUtils.skipCurrentTag(parser);
-			continue;
-		}
-		perm = perm.intern();
-		readPermission(parser, perm);
-	}
-}
-```
 
+#### 将对应权限的gid(组ID)添加到对应的PermissionEntry对象中
 ```java
 void SystemConfig::readPermission(XmlPullParser parser, String name)
 		throws IOException, XmlPullParserException {
@@ -292,7 +244,8 @@ void SystemConfig::readPermission(XmlPullParser parser, String name)
 }
 ```
 
-
+#### Settings
+Settings类主要职责将安装信息保存到packages.xml和packages.list中，运行时权限保存在runtime-permissions.xml中
 ```java
 Settings(File dataDir, PermissionSettings permission, Object lock) {
 	mLock = lock;
@@ -305,7 +258,7 @@ Settings(File dataDir, PermissionSettings permission, Object lock) {
 }
 ```
 
-### /data/system/packages.xml
+#### /data/system/packages.xml
 ```c
 <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
 <packages>
@@ -324,32 +277,23 @@ Settings(File dataDir, PermissionSettings permission, Object lock) {
         <perms>
             <item name="android.permission.SYSTEM_ALERT_WINDOW" granted="true" flags="0" />
             <item name="android.permission.FOREGROUND_SERVICE" granted="true" flags="0" />
-            <item name="android.permission.RECEIVE_BOOT_COMPLETED" granted="true" flags="0" />
-            <item name="android.permission.BLUETOOTH" granted="true" flags="0" />
-            <item name="android.permission.WRITE_MEDIA_STORAGE" granted="true" flags="0" />
-            <item name="android.permission.GET_TASKS" granted="true" flags="0" />
-            <item name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS" granted="true" flags="0" />
-            <item name="android.permission.STATUS_BAR_SERVICE" granted="true" flags="0" />
-            <item name="android.permission.MANAGE_USERS" granted="true" flags="0" />
-            <item name="android.permission.READ_LOGS" granted="true" flags="0" />
-            <item name="com.mediatek.engineermode.permission.WIFI_LOG" granted="true" flags="0" />
-            <item name="android.permission.VIBRATE" granted="true" flags="0" />
-            <item name="android.permission.READ_FRAME_BUFFER" granted="true" flags="0" />
-            <item name="android.permission.DUMP" granted="true" flags="0" />
         </perms>
         <proper-signing-keyset identifier="1" />
     </package>
 </packages>
 ```
 
-### /data/system/packages.list
+####  /data/system/packages.list
 apk安装信息uid,gids
-```java
+```c
 com.android.fmradio 10018 0 /data/user/0/com.android.fmradio platform:privapp:targetSdkVersion=28 3002,1013
 com.mediatek.gba 1001 0 /data/user/0/com.mediatek.gba platform:privapp:targetSdkVersion=28 1065,3002,1023,3003,3001,3007,1002,3010,3011,3006
 com.mediatek.ims 1001 0 /data/user/0/com.mediatek.ims platform:privapp:targetSdkVersion=28 1065,3002,1023,3003,3001,3007,1002,3010,3011,3006
 ```
 
+#### readLPw
+- 1 解析package.xml
+- 2 解析runtime-permissions.xml
 ```java
 boolean Settings::readLPw(@NonNull List<UserInfo> users) {
 	str = new FileInputStream(mSettingsFilename);
@@ -366,35 +310,7 @@ boolean Settings::readLPw(@NonNull List<UserInfo> users) {
 }
 ```
 
-```java
-public void PermissionSettings::readPermissions(XmlPullParser parser) throws IOException, XmlPullParserException {
-	synchronized (mLock) {
-		readPermissions(mPermissions, parser);
-	}
-}
-```
-
-```java
-public static void PermissionSettings::readPermissions(ArrayMap<String, BasePermission> out, XmlPullParser parser)
-            throws IOException, XmlPullParserException {
-	int outerDepth = parser.getDepth();
-	int type;
-	while ((type = parser.next()) != XmlPullParser.END_DOCUMENT
-			&& (type != XmlPullParser.END_TAG || parser.getDepth() > outerDepth)) {
-		if (type == XmlPullParser.END_TAG || type == XmlPullParser.TEXT) {
-			continue;
-		}
-
-		if (!BasePermission.readLPw(out, parser)) {
-			PackageManagerService.reportSettingsProblem(Log.WARN,
-					"Unknown element reading permissions: " + parser.getName() + " at "
-							+ parser.getPositionDescription());
-		}
-		XmlUtils.skipCurrentTag(parser);
-	}
-}
-```
-
+readPermissions最终调用到BasePermission的readLPw函数，mPermissions中是否存在对应的bp对象， 不存在则创建BasePermission对象，根据dynamic字段来确认是TYPE_DYNAMIC或TYPE_NORMAL类型，将填充好数据的BasePermission对象保存到mPermissions中
 ```java
 public static boolean BasePermission::readLPw(@NonNull Map<String, BasePermission> out,
             @NonNull XmlPullParser parser) {
@@ -439,7 +355,7 @@ public static boolean BasePermission::readLPw(@NonNull Map<String, BasePermissio
 }
 ```
 
-
+#### readStateForUserSyncLPr
 ```java
 public void RuntimePermissionPersistence::readStateForUserSyncLPr(int userId) {
 	/* getUserRuntimePermissionsFile 文件对应runtime-permissions.xml */
@@ -471,7 +387,7 @@ public void RuntimePermissionPersistence::readStateForUserSyncLPr(int userId) {
 }
 ```
 
-
+#### parseRuntimePermissionsLPr
 ```java
 private void RuntimePermissionPersistence::parseRuntimePermissionsLPr(XmlPullParser parser, int userId)
                 throws IOException, XmlPullParserException {
@@ -493,6 +409,8 @@ private void RuntimePermissionPersistence::parseRuntimePermissionsLPr(XmlPullPar
 }
 ```
 
+#### parsePermissionsLPr
+从runtime-permissions.xml中解析出对应的apk是否已经授权过，如果用户之前授权过，则直接授权（相当于把上次用户授权过的信息读取出来授权），并更新mUserStates相关权限信息，否则只更新mUserStates相关权限信息
 ```java
  private void RuntimePermissionPersistence::parsePermissionsLPr(XmlPullParser parser, PermissionsState permissionsState,
                 int userId) throws IOException, XmlPullParserException {
@@ -525,7 +443,7 @@ private void RuntimePermissionPersistence::parseRuntimePermissionsLPr(XmlPullPar
 						? Integer.parseInt(flagsStr, 16) : 0;
 
 				if (granted) {
-				  /* 如果之前授权过，则直接授权 */
+					/* 如果之前授权过，则直接授权 */
 					permissionsState.grantRuntimePermission(bp, userId);
 					/* 更新mUserStates相关权限信息 */
 					permissionsState.updatePermissionFlags(bp, userId,
@@ -541,8 +459,12 @@ private void RuntimePermissionPersistence::parseRuntimePermissionsLPr(XmlPullPar
 }
 ```
 
-// apk中的权限合并到mPermissions中位置在哪, apk中的requestedPermissions权限在什么时候授权
-// apk的扫描只分析关键部分
+#### parseBaseApkCommon
+apk中的AndroidManifest.xml中也有权限，解析AndroidManifest.xml中的权限位置发生在扫描apk安装过程中， 然后将apk中的权限合并到mPermissions中
+，我们只分析apk的扫描关键部分
+1 一个apk对应一个pkg对象
+2 apk中所有定义的权限会保存在permissions列表中
+3 apk中用户请求的权限会保存在requestedPermissions列表中
 ```java
 private Package PackageParser::parseBaseApkCommon(Package pkg, Set<String> acceptedTags, Resources res,
 	XmlResourceParser parser, int flags, String[] outError) throws XmlPullParserException,
@@ -567,38 +489,37 @@ private Package PackageParser::parseBaseApkCommon(Package pkg, Set<String> accep
 }
 ```
 
-
+#### parsePermission
+为对应的权限创建一个Permission对象， 并将Permission对象添加到pkg中的permissions列表中
 ```java
 private boolean PackageParser::parsePermission(Package owner, Resources res,
             XmlResourceParser parser, String[] outError)
         throws XmlPullParserException, IOException {
 	/* 创建Permission对象 */
 	Permission perm = new Permission(owner);
-  /* 将定义的权限添加到pkg对象中 */
+	/* 将定义的权限添加到pkg对象中 */
 	owner.permissions.add(perm);
     return true;
 }
 ```
 
-```java
-private void PackageManagerService::commitScanResultsLocked(@NonNull ScanRequest request, @NonNull ScanResult result)
-            throws PackageManagerException {
-	 commitPackageSettings(pkg, oldPkg, pkgSetting, user, scanFlags,
-        (parseFlags & PackageParser.PARSE_CHATTY) != 0 /*chatty*/);
-}
-```
 
 
+#### commitPackageSettings
+apk安装信息解析完后，把pkg中的安装信息合并到PermissionSettings，apk中的permissions添加到PermissionSettings的mPermissions中
 ```java
 private void PackageManagerService::commitPackageSettings(PackageParser.Package pkg,
             @Nullable PackageParser.Package oldPkg, PackageSetting pkgSetting, UserHandle user,
             final @ScanFlags int scanFlags, boolean chatty) {
-  /* 把pkg，即apk中的permissions合并到PermissionSettings的mPermissions中 */
+	/* 把pkg，即apk中的permissions合并到PermissionSettings的mPermissions中 */
 	/* addAllPermissions调用的PermissionManagerService中的addAllPermissions方法 */
 	mPermissionManager.addAllPermissions(pkg, chatty);
 }
 ```
 
+
+#### addAllPermissions
+遍历apk中的权限信息，去重后，将bp对象添加到mSettings中
 ```java
 private void PermissionManagerService::addAllPermissions(PackageParser.Package pkg, boolean chatty) {
 	final int N = pkg.permissions.size();
@@ -628,7 +549,8 @@ private void PermissionManagerService::addAllPermissions(PackageParser.Package p
 }
 ```
 
-
+#### updateAllPermissions
+sdk没有升级的情况下flags为UPDATE_PERMISSIONS_ALL,接下来我们分析updatePermissions函数
 ```java
 private void PermissionManagerService::updateAllPermissions(String volumeUuid, boolean sdkUpdated,
 		Collection<PackageParser.Package> allPackages, PermissionCallback callback) {
@@ -640,13 +562,15 @@ private void PermissionManagerService::updateAllPermissions(String volumeUuid, b
 }
 ```
 
+#### updatePermissions
+updateAllPermissions中传入的参数可知，changingPkgName和changingPkg都为null, changingPkg为空，接下来调用grantPermissions函数给apk授权
 ```java
 private void PermissionManagerService::updatePermissions(String changingPkgName, PackageParser.Package changingPkg,
 		String replaceVolumeUuid, int flags, Collection<PackageParser.Package> allPackages,
 		PermissionCallback callback) {
-  /* changingPkgName = null, changingPkg = null, flags = UPDATE_PERMISSIONS_ALL */
+	/* changingPkgName = null, changingPkg = null, flags = UPDATE_PERMISSIONS_ALL */
 	flags = updatePermissionTrees(changingPkgName, changingPkg, flags);
-	/* 更新权限 */
+	/* 更新权限，回过头来又是调用updatePermissions的重载函数 */
 	flags = updatePermissions(changingPkgName, changingPkg, flags);
 
 	Trace.traceBegin(TRACE_TAG_PACKAGE_MANAGER, "grantPermissions");
@@ -675,6 +599,8 @@ private void PermissionManagerService::updatePermissions(String changingPkgName,
 }
 ```
 
+#### grantPermissions
+遍历pkg中的requestedPermissions，根据不同类型做不同的处理， 普通权限直接授予安装时权限，运行时权限则根据用户之前是否授权过（状态从runtime-permissions.xml中读取），系统权限验证签名相关信息直接给予安装时权限,通过callback最后将信息写入runtime-permissions.xml中
 ```java
 private void PermissionManagerService::grantPermissions(PackageParser.Package pkg, boolean replace,
             String packageOfInterest, PermissionCallback callback) {
@@ -683,7 +609,7 @@ private void PermissionManagerService::grantPermissions(PackageParser.Package pk
     if (ps == null) {
         return;
     }
-		/* 一个pkg对应一个PermissionsState对象 */
+	/* 一个pkg对应一个PermissionsState对象 */
     final PermissionsState permissionsState = ps.getPermissionsState();
     PermissionsState origPermissions = permissionsState;
 
@@ -711,7 +637,7 @@ private void PermissionManagerService::grantPermissions(PackageParser.Package pk
 
             if (bp.isNormal()) {
                 // For all apps normal permissions are install time ones.
-								/* 安装权限 */
+				/* 安装权限 */
                 grant = GRANT_INSTALL;
             } else if (bp.isRuntime()) {
                 // If a permission review is required for legacy apps we represent
@@ -731,7 +657,7 @@ private void PermissionManagerService::grantPermissions(PackageParser.Package pk
                     grant = GRANT_UPGRADE;
                 } else {
                     // For modern apps keep runtime permissions unchanged.
-										/* 运行时权限 */
+					/* 运行时权限 */
                     grant = GRANT_RUNTIME;
                 }
             } else if (bp.isSignature()) {
@@ -758,7 +684,7 @@ private void PermissionManagerService::grantPermissions(PackageParser.Package pk
                     }
 
                     // Grant an install permission.
-										/* 给安装权限 */
+					/* 给安装权限 */
                     if (permissionsState.grantInstallPermission(bp) !=
                             PermissionsState.PERMISSION_OPERATION_FAILURE) {
                         changedInstallPermission = true;
@@ -768,9 +694,9 @@ private void PermissionManagerService::grantPermissions(PackageParser.Package pk
                 case GRANT_RUNTIME: {
                     // Grant previously granted runtime permissions.
                     for (int userId : UserManagerService.getInstance().getUserIds()) {
-												/* 使用之前授权的状态 ，状态从runtime-permissions.xml中读取 */
-												final PermissionState permissionState = origPermissions
-                                .getRuntimePermissionState(perm, userId);
+						/* 使用之前授权的状态 ，状态从runtime-permissions.xml中读取 */
+						final PermissionState permissionState = origPermissions
+							.getRuntimePermissionState(perm, userId);
                         int flags = permissionState != null
                                 ? permissionState.getFlags() : 0;
                         if (origPermissions.hasRuntimePermission(perm, userId)) {
@@ -785,7 +711,7 @@ private void PermissionManagerService::grantPermissions(PackageParser.Package pk
     }
 
     if (callback != null) {
-			  /* 回调PackageManagerService中的onPermissionUpdated函数 */
+		/* 回调PackageManagerService中的onPermissionUpdated函数 */
         callback.onPermissionUpdated(updatedUserIds, runtimePermissionsRevoked);
     }
 }
@@ -796,7 +722,7 @@ private void PermissionManagerService::grantPermissions(PackageParser.Package pk
 public void PackageManagerService::onPermissionUpdated(int[] updatedUserIds, boolean sync) {
     synchronized (mPackages) {
         for (int userId : updatedUserIds) {
-					  /* 将运行时相关信息写入runtime-permissions.xml中 */
+			/* 将运行时相关信息写入runtime-permissions.xml中 */
             mSettings.writeRuntimePermissionsForUserLPr(userId, sync);
         }
     }
@@ -804,188 +730,54 @@ public void PackageManagerService::onPermissionUpdated(int[] updatedUserIds, boo
 ```
 
 
-```c
+#### writeLPr
+将apk安装信息写入文件
+```java
 void Settings::writeLPr() {
-	  /* packages.xml */
+	/* packages.xml */
     FileOutputStream fstr = new FileOutputStream(mSettingsFilename);
     BufferedOutputStream str = new BufferedOutputStream(fstr);
 
-		serializer.startTag(null, "permissions");
-		/* 权限信息写入 */
+	serializer.startTag(null, "permissions");
+	/* 权限信息写入 */
     mPermissions.writePermissions(serializer);
     serializer.endTag(null, "permissions");
 
-		for (final PackageSetting pkg : mPackages.values()) {
-			  /* 写入pkg信息 */
-    		writePackageLPr(serializer, pkg);
+	for (final PackageSetting pkg : mPackages.values()) {
+		/* 写入pkg信息 */
+		writePackageLPr(serializer, pkg);
     }
 
-		/* 写入运行时权限 */
-		writeAllRuntimePermissionsLPr();
+	/* 写入运行时权限 */
+	writeAllRuntimePermissionsLPr();
 }
 ```
 
-```java
-public void PermissionSettings::writePermissions(XmlSerializer serializer) throws IOException {
-    synchronized (mLock) {
-        for (BasePermission bp : mPermissions.values()) {
-            bp.writeLPr(serializer);
-        }
-    }
-}
-```
-
-```java
-public void BasePermission::writeLPr(@NonNull XmlSerializer serializer) throws IOException {
-    if (sourcePackageName == null) {
-        return;
-    }
-    serializer.startTag(null, TAG_ITEM);
-    serializer.attribute(null, ATTR_NAME, name);
-    serializer.attribute(null, ATTR_PACKAGE, sourcePackageName);
-    if (protectionLevel != PermissionInfo.PROTECTION_NORMAL) {
-        serializer.attribute(null, "protection", Integer.toString(protectionLevel));
-    }
-    if (type == BasePermission.TYPE_DYNAMIC) {
-        final PermissionInfo pi = perm != null ? perm.info : pendingPermissionInfo;
-        if (pi != null) {
-            serializer.attribute(null, "type", "dynamic");
-            if (pi.icon != 0) {
-                serializer.attribute(null, "icon", Integer.toString(pi.icon));
-            }
-            if (pi.nonLocalizedLabel != null) {
-                serializer.attribute(null, "label", pi.nonLocalizedLabel.toString());
-            }
-        }
-    }
-    serializer.endTag(null, TAG_ITEM);
-}
-```
-
-```java
-void Settings::writeAllRuntimePermissionsLPr() {
-    for (int userId : UserManagerService.getInstance().getUserIds()) {
-        mRuntimePermissionsPersistence.writePermissionsForUserAsyncLPr(userId);
-    }
-}
-```
-
-
-```java
-public void RuntimePermissionPersistence::writePermissionsForUserAsyncLPr(int userId) {
-    final long currentTimeMillis = SystemClock.uptimeMillis();
-    if (mWriteScheduled.get(userId)) {
-        mHandler.removeMessages(userId);
-        mHandler.sendMessageDelayed(message, writeDelayMillis);
-    } else {
-        mLastNotWrittenMutationTimesMillis.put(userId, currentTimeMillis);
-        Message message = mHandler.obtainMessage(userId);
-        mHandler.sendMessageDelayed(message, WRITE_PERMISSIONS_DELAY_MILLIS);
-        mWriteScheduled.put(userId, true);
-    }
-}
-```
-
-```java
-private void RuntimePermissionPersistence::writePermissionsSync(int userId) {
-	 /* runtime-permissions.xml */
-   AtomicFile destination = new AtomicFile(getUserRuntimePermissionsFile(userId),
-           "package-perms-" + userId);
-   ArrayMap<String, List<PermissionState>> permissionsForPackage = new ArrayMap<>();
-   ArrayMap<String, List<PermissionState>> permissionsForSharedUser = new ArrayMap<>();
-   synchronized (mPersistenceLock) {
-       mWriteScheduled.delete(userId);
-       final int packageCount = mPackages.size();
-       for (int i = 0; i < packageCount; i++) {
-           String packageName = mPackages.keyAt(i);
-           PackageSetting packageSetting = mPackages.valueAt(i);
-           if (packageSetting.sharedUser == null) {
-               PermissionsState permissionsState = packageSetting.getPermissionsState();
-               List<PermissionState> permissionsStates = permissionsState
-                       .getRuntimePermissionStates(userId);
-               if (!permissionsStates.isEmpty()) {
-								   /* 将permissionsState状态信息添加到 permissionsForPackage中 */
-                   permissionsForPackage.put(packageName, permissionsStates);
-               }
-           }
-       }
-   }
-
-   FileOutputStream out = null;
-   try {
-       out = destination.startWrite();
-
-       XmlSerializer serializer = Xml.newSerializer();
-       serializer.setOutput(out, StandardCharsets.UTF_8.name());
-       serializer.setFeature("http://xmlpull.org/v1/doc/features.html#indent-output", true);
-       serializer.startDocument(null, true);
-
-       serializer.startTag(null, TAG_RUNTIME_PERMISSIONS);
-
-       String fingerprint = mFingerprints.get(userId);
-       if (fingerprint != null) {
-           serializer.attribute(null, ATTR_FINGERPRINT, fingerprint);
-       }
-
-       final int packageCount = permissionsForPackage.size();
-       for (int i = 0; i < packageCount; i++) {
-           String packageName = permissionsForPackage.keyAt(i);
-           List<PermissionState> permissionStates = permissionsForPackage.valueAt(i);
-           serializer.startTag(null, TAG_PACKAGE);
-           serializer.attribute(null, ATTR_NAME, packageName);
-					 /* 写入xml文件 */
-           writePermissions(serializer, permissionStates);
-           serializer.endTag(null, TAG_PACKAGE);
-       }
-       serializer.endTag(null, TAG_RUNTIME_PERMISSIONS);
-   // Any error while writing is fatal.
-   } catch (Throwable t) {
-       Slog.wtf(PackageManagerService.TAG,
-               "Failed to write settings, restoring backup", t);
-       destination.failWrite(out);
-   } finally {
-       IoUtils.closeQuietly(out);
-   }
-}
-```
-
-```java
-private void RuntimePermissionPersistence::writePermissions(XmlSerializer serializer,
-        List<PermissionState> permissionStates) throws IOException {
-    for (PermissionState permissionState : permissionStates) {
-        serializer.startTag(null, TAG_ITEM);
-        serializer.attribute(null, ATTR_NAME,permissionState.getName());
-        serializer.attribute(null, ATTR_GRANTED,
-                String.valueOf(permissionState.isGranted()));
-        serializer.attribute(null, ATTR_FLAGS,
-                Integer.toHexString(permissionState.getFlags()));
-        serializer.endTag(null, TAG_ITEM);
-    }
-}
-```
-
+#### systemReady
+systemReady函数给某些系统apk授予运行时权限, 更新权限信息
 ```java
 PackageManagerService::systemReady() {
-		// If we upgraded grant all default permissions before kicking off.
-	  for (int userId : grantPermissionsUserIds) {
-			  /* 给默认系统某些apk授予特定的运行权限 */
-	    	mDefaultPermissionPolicy.grantDefaultPermissions(userId);
-	  }
+	// If we upgraded grant all default permissions before kicking off.
+	for (int userId : grantPermissionsUserIds) {
+		/* 给默认系统某些apk授予特定的运行权限 */
+		mDefaultPermissionPolicy.grantDefaultPermissions(userId);
+	}
 
-		synchronized (mPackages) {
-			/* 再次进行对所有的apk授权更新 */
-			mPermissionManager.updateAllPermissions(
-					StorageManager.UUID_PRIVATE_INTERNAL, false, mPackages.values(),
-					mPermissionCallback);
-		}
+	synchronized (mPackages) {
+		/* 再次进行对所有的apk授权更新 */
+		mPermissionManager.updateAllPermissions(
+			StorageManager.UUID_PRIVATE_INTERNAL, false, mPackages.values(),
+			mPermissionCallback);
+	}
 }
 ```
 
-
+#### DefaultPermissionGrantPolicy
+DefaultPermissionGrantPolicy主要是给系统授予默认的运行时权限
 ```java
 public void DefaultPermissionGrantPolicy::grantDefaultPermissions(int userId) {
     /* 给系统apk授运行时权限，以及给一些特定的apk授权 */
-		grantPermissionsToSysComponentsAndPrivApps(userId);
+	grantPermissionsToSysComponentsAndPrivApps(userId);
     grantDefaultSystemHandlerPermissions(userId);
     grantDefaultPermissionExceptions(userId);
 }
@@ -1000,12 +792,13 @@ private void DefaultPermissionGrantPolicy::grantPermissionsToSysComponentsAndPri
         if (pkg == null) {
             continue;
         }
+        // 不是系统apk等直接继续
         if (!isSysComponentOrPersistentPlatformSignedPrivApp(pkg)
                 || !doesPackageSupportRuntimePermissions(pkg)
                 || pkg.requestedPermissions.isEmpty()) {
             continue;
         }
-				/* 给系统apk授运行时权限 */
+		/* 给系统apk授运行时权限 */
         grantRuntimePermissionsForPackage(userId, pkg);
     }
 }
@@ -1024,7 +817,7 @@ private void DefaultPermissionGrantPolicy::grantRuntimePermissionsForPackage(int
         }
     }
     if (!permissions.isEmpty()) {
-			  /* 授权为true */
+		/* 授权为true */
         grantRuntimePermissions(pkg, permissions, true, userId);
     }
 }
@@ -1060,6 +853,7 @@ private void grantRuntimePermissions(PackageParser.Package pkg, Set<String> perm
 ```java
 public void PackageManagerInternalImpl::updatePermissionFlagsTEMP(String permName, String packageName, int flagMask,
         int flagValues, int userId) {
+    // 通知权限改变
     PackageManagerService.this.updatePermissionFlags(
             permName, packageName, flagMask, flagValues, userId);
 }

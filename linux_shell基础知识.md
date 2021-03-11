@@ -384,10 +384,48 @@ echo "this is a sample" > temp.txt
 echo "this is a sample" >> temp.txt
 ```
 
+##### sed简单使用
+sed的命令格式: sed [options] 'command' file(s)
+- -i 直接修改文件内容
+- d 删除，删除选择的行
+- s 替换指定字符
+- g 表示可以使sed执行全局替换
+```bash
+# 1 替换
+sed -i 's/pattern/replace/' file
+
+# 2 替换
+sed -i 's/pattern/replace/g' file
+
+# 3 sed命令会将s之后的字符视为命令分隔符
+sed 's:text:replace:g'
+
+# 删除空行
+sed -i '/^$/d' file
+```
 
 
+##### awk简单使用
+awk以每行的形式处理文件
+| 内部变量 | 说明 |
+| ------| ---- |
+| NF    |              浏览记录的域的个数 |
+| NR    |              已读的记录数 |
+| OFS   |              输出域分隔符 |
+| ORS   |              输出记录分隔符 |
+| RS    |             控制记录分隔符 |
+| $0变量是指整条记录 | $1表示当前行的第一个域,$2表示当前行的第二个域,......以此类推|
+```bash
+# 1 awk结构
+awk 'BEGIN{ print "start"} pattern { command }  END{ print "end"}' file
 
-sed
+# 2默认的字段分割符是空格
+awk '{print $1, $2}' file
+
+# 3打印行号
+awk 'END { print NR}'
 
 
-awk
+# 4 默认的字段分割符是空格，也可以用选项-F指定不同的分隔符
+awk -F: '{ print $NF}' file
+```
